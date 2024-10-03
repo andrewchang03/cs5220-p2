@@ -1,0 +1,5 @@
+# -- Compile settings for my laptop
+CPP = clang++
+CPPFLAGS= -I/usr/local/opt/libomp/include -I/usr/local/Cellar/lua/5.4.7/include -std=c++17 -Wall -g -Xpreprocessor -fopenmp
+OPTFLAGS = -O3
+LIBS     = -lm -L/usr/local/Cellar/lua/5.4.7/lib -llua -L/usr/local/opt/libomp/lib -lomp

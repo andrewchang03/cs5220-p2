@@ -1,0 +1,19 @@
+#!/bin/bash
+#SBATCH -J sph
+#SBATCH -o sph_%j.out
+#SBATCH -e sph_%j.err
+#SBATCH -A m4776
+#SBATCH -C cpu
+#SBATCH -c 32
+#SBATCH --qos=debug
+#SBATCH -t 00:10:00
+#SBATCH -N 1
+#SBATCH -n 1
+
+
+export SLURM_CPU_BIND="cores"
+export OMP_NUM_THREADS=8
+export OMP_PROC_BIND=spread
+export OMP_PLACES=threads
+make exe
+srun ./sph.x

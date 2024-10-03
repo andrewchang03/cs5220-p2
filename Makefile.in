@@ -1,0 +1,6 @@
+# -- Compile settings for the cluster
+CPP       = CC
+CPPFLAGS  = -std=c++11 -Wall -g -fopenmp
+OPTFLAGS = -O3
+LIBS     = -lm
+
