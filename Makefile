@@ -57,4 +57,4 @@ clean:
 	rm -f derivation.log derivation.aux derivation.out
 
 realclean: clean
-	rm -f main.pdf derivation.pdf *.x run.out *.pov
+	rm -f main.pdf derivation.pdf *.x run.out gmon.out *.pov
