@@ -60,6 +60,22 @@ void compute_density(sim_state_t* s, sim_param_t* params)
     // Accumulate density info
 #ifdef USE_BUCKETING
     /* BEGIN TASK */
+    #pragma omp parallel 
+    {
+        #pragma omp for nowait
+        for (int i = 0; i < HASH_SIZE; i++) {
+            particle_t* pi = hash[i];
+            while (pi != NULL) {
+                particle_t* pj = pi->next;
+                while (pj != NULL) {
+                    update_density(pi, pj, h2, C);
+                    pj = pj->next;
+                }
+                pi = pi->next;
+            }
+        }
+    }
+
     for (int i = 0; i < n; i++) {
         particle_t* pi = p + i;
         pi->rho += ( 315.0 / 64.0 / M_PI ) * s->mass / h3;
@@ -67,11 +83,11 @@ void compute_density(sim_state_t* s, sim_param_t* params)
         // Interact with particles in the same bucket
         // To prevent repeated calculations, only interact with particles after current
         // Particles connected by next pointers are all in the same hash bucket after hashing
-        particle_t* pj = pi->next;
-        while (pj != NULL) {
-            update_density(pi, pj, h2, C);
-            pj = pj->next;
-        }
+        // particle_t* pj = pi->next;
+        // while (pj != NULL) {
+        //     update_density(pi, pj, h2, C);
+        //     pj = pj->next;
+        // }
 
         // Interact with particles in the neighboring buckets
         // To prevent repeated calculations, only interact with particles in buckets of greater hash
@@ -179,17 +195,33 @@ void compute_accel(sim_state_t* state, sim_param_t* params)
     // Accumulate forces
 #ifdef USE_BUCKETING
     /* BEGIN TASK */
+    #pragma omp parallel
+    {
+        #pragma omp for nowait
+        for (int i = 0; i < HASH_SIZE; i++) {
+            particle_t* pi = state->hash[i];
+            while (pi != NULL) {
+                particle_t* pj = pi->next;
+                while (pj != NULL) {
+                    update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
+                    pj = pj->next;
+                }
+                pi = pi->next;
+            }
+        }
+    }
+
     for (int i = 0; i < n; i++) {
         particle_t* pi = p + i;
 
         // Interact with particles in the same bucket
         // To prevent repeated calculations, only interact with particles after current
         // Particles connected by next pointers are all in the same hash bucket after hashing
-        particle_t* pj = pi->next;
-        while (pj != NULL) {
-            update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
-            pj = pj->next;
-        }
+        // particle_t* pj = pi->next;
+        // while (pj != NULL) {
+        //     update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
+        //     pj = pj->next;
+        // }
 
         // Interact with particles in the neighboring buckets
         // To prevent repeated calculations, only interact with particles in buckets of greater hash
