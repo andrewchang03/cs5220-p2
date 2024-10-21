@@ -60,18 +60,11 @@ void compute_density(sim_state_t* s, sim_param_t* params)
     // Accumulate density info
 #ifdef USE_BUCKETING
     /* BEGIN TASK */
-    #pragma omp parallel 
-    {
-        #pragma omp for nowait
-        for (int i = 0; i < HASH_SIZE; i++) {
-            particle_t* pi = hash[i];
-            while (pi != NULL) {
-                particle_t* pj = pi->next;
-                while (pj != NULL) {
-                    update_density(pi, pj, h2, C);
-                    pj = pj->next;
-                }
-                pi = pi->next;
+    // #pragma omp parallel for schedule(static, 1)
+    for (int i = 0; i < HASH_SIZE; i++) {
+        for (particle_t* pi = hash[i]; pi; pi = pi->next) {
+            for (particle_t* pj = pi->next; pj; pj = pj->next) {
+                update_density(pi, pj, h2, C);
             }
         }
     }
@@ -97,10 +90,8 @@ void compute_density(sim_state_t* s, sim_param_t* params)
         for (unsigned bin = 0; bin < num_bins; bin++) { // for each bin
             unsigned hash_bucket = buckets[bin];
             if (hash_bucket <= curr_bucket) continue;
-            particle_t* pj = hash[hash_bucket];
-            while (pj != NULL) {
+            for (particle_t* pj = hash[hash_bucket]; pj; pj = pj->next) {
                 update_density(pi, pj, h2, C);
-                pj = pj->next;
             }
         }
     }
@@ -195,49 +186,33 @@ void compute_accel(sim_state_t* state, sim_param_t* params)
     // Accumulate forces
 #ifdef USE_BUCKETING
     /* BEGIN TASK */
-    #pragma omp parallel
-    {
-        #pragma omp for nowait
-        for (int i = 0; i < HASH_SIZE; i++) {
-            particle_t* pi = state->hash[i];
-            while (pi != NULL) {
-                particle_t* pj = pi->next;
-                while (pj != NULL) {
-                    update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
-                    pj = pj->next;
-                }
-                pi = pi->next;
+
+    // Interact with particles in the same bucket
+    // #pragma omp parallel for schedule(static, 1)
+    for (int i = 0; i < HASH_SIZE; i++) {
+        for (particle_t* pi = state->hash[i]; pi; pi = pi->next) {
+            for (particle_t* pj = pi->next; pj; pj = pj->next) {
+                update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
             }
         }
     }
 
+    // Interact with particles in the neighboring buckets
+    // #pragma omp parallel for
     for (int i = 0; i < n; i++) {
         particle_t* pi = p + i;
-
-        // Interact with particles in the same bucket
-        // To prevent repeated calculations, only interact with particles after current
-        // Particles connected by next pointers are all in the same hash bucket after hashing
-        // particle_t* pj = pi->next;
-        // while (pj != NULL) {
-        //     update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
-        //     pj = pj->next;
-        // }
-
-        // Interact with particles in the neighboring buckets
-        // To prevent repeated calculations, only interact with particles in buckets of greater hash
         unsigned curr_bucket = particle_bucket(pi, h);
         unsigned buckets[MAX_NBR_BINS]; // stores zm index of all neighboring bins 
         unsigned num_bins = particle_neighborhood(buckets, pi, h);
         for (unsigned bin = 0; bin < num_bins; bin++) { // for each bin
             unsigned hash_bucket = buckets[bin];
             if (hash_bucket <= curr_bucket) continue;
-            particle_t* pj = hash[hash_bucket];
-            while (pj != NULL) {
+            for (particle_t* pj = hash[hash_bucket]; pj; pj = pj->next) {
                 update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
-                pj = pj->next;
             }
         }
     }
+    
     /* END TASK */
 #else
     for (int i = 0; i < n; ++i) {

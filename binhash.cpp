@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdio.h>
 
 #include "zmorton.hpp"
 #include "binhash.hpp"
@@ -32,9 +33,9 @@ unsigned particle_neighborhood(unsigned* buckets, particle_t* p, float h)
 {
     /* BEGIN TASK */
     // boundaries
-    const unsigned XMAX = 1.0F / h;
-    const unsigned YMAX = 1.0F / h;
-    const unsigned ZMAX = 1.0F / h;
+    // const unsigned XMAX = 1.0F / h;
+    // const unsigned YMAX = 1.0F / h;
+    // const unsigned ZMAX = 1.0F / h;
 
     // extract ix, iy, iz
     unsigned ix = p->x[0] / h;
@@ -54,8 +55,8 @@ unsigned particle_neighborhood(unsigned* buckets, particle_t* p, float h)
                 unsigned jz = iz + dz;
 
                 // out of boundary
-                if (jx < 0 || jx >= XMAX || jy < 0 || jy >= YMAX || jz < 0 || jz >= ZMAX) 
-                    continue;
+                // if (jx < 0 || jx >= XMAX || jy < 0 || jy >= YMAX || jz < 0 || jz >= ZMAX) 
+                //     continue;
                 
                 unsigned zm_index = zm_encode(jx & HASH_MASK, jy & HASH_MASK, jz & HASH_MASK);
                 buckets[num_bins++] = zm_index;
@@ -71,6 +72,7 @@ void hash_particles(sim_state_t* s, float h)
 {
     /* BEGIN TASK */
     memset(s->hash, 0, HASH_SIZE * sizeof(particle_t*));
+    // #pragma omp parallel for
     for (int i = 0; i < s->n; i++) { // iterate through each particle
         particle_t* pi = &s->part[i];
         unsigned zm_index = particle_bucket(pi, h); // calculate zm index (the hash)
