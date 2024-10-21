@@ -43,6 +43,18 @@ inline void update_density(particle_t *pi, particle_t *pj, float h2, float C)
     }
 }
 
+inline float local_update_density(particle_t *pi, particle_t *pj, float h2, float C)
+{
+    float r2 = vec3_dist2(pi->x, pj->x);
+    float z = h2 - r2;
+    if (z > 0)
+    {
+        float rho_ij = C * z * z * z;
+        return rho_ij;
+    }
+    return 0.0f;
+}
+
 void compute_density(sim_state_t *s, sim_param_t *params)
 {
     int n = s->n;
@@ -63,49 +75,97 @@ void compute_density(sim_state_t *s, sim_param_t *params)
         // Accumulate density info
 #ifdef USE_BUCKETING
 /* BEGIN TASK */
-// #pragma omp parallel for schedule(static, 1)
-#pragma omp parallel for
-    for (int i = 0; i < HASH_SIZE; i++)
+// #pragma omp parallel for
+//     for (int i = 0; i < HASH_SIZE; i++)
+//     {
+//         for (particle_t *pi = hash[i]; pi; pi = pi->next)
+//         {
+//             for (particle_t *pj = pi->next; pj; pj = pj->next)
+//             {
+//                 update_density(pi, pj, h2, C);
+//             }
+//         }
+//     }
+
+// #pragma omp parallel for
+//     for (int i = 0; i < n; i++)
+//     {
+//         particle_t *pi = p + i;
+//         pi->rho += (315.0 / 64.0 / M_PI) * s->mass / h3;
+
+//         // Interact with particles in the same bucket
+//         // To prevent repeated calculations, only interact with particles after current
+//         // Particles connected by next pointers are all in the same hash bucket after hashing
+//         // particle_t* pj = pi->next;
+//         // while (pj != NULL) {
+//         //     update_density(pi, pj, h2, C);
+//         //     pj = pj->next;
+//         // }
+
+//         // Interact with particles in the neighboring buckets
+//         // To prevent repeated calculations, only interact with particles in buckets of greater hash
+//         unsigned curr_bucket = particle_bucket(pi, h);
+//         unsigned buckets[MAX_NBR_BINS]; // stores zm index of all neighboring bins
+//         unsigned num_bins = particle_neighborhood(buckets, pi, h);
+//         for (unsigned bin = 0; bin < num_bins; bin++)
+//         { // for each bin
+//             unsigned hash_bucket = buckets[bin];
+//             if (hash_bucket <= curr_bucket)
+//                 continue;
+//             for (particle_t *pj = hash[hash_bucket]; pj; pj = pj->next)
+//             {
+//                 update_density(pi, pj, h2, C);
+//             }
+//         }
+//     }
+#pragma omp parallel
     {
-        for (particle_t *pi = hash[i]; pi; pi = pi->next)
+        float *local_rho = (float *)calloc(n, sizeof(float));
+
+#pragma omp for
+        for (int i = 0; i < HASH_SIZE; i++)
         {
-            for (particle_t *pj = pi->next; pj; pj = pj->next)
+            for (particle_t *pi = hash[i]; pi; pi = pi->next)
             {
-                update_density(pi, pj, h2, C);
+                for (particle_t *pj = pi->next; pj; pj = pj->next)
+                {
+                    float rho_ij = local_update_density(pi, pj, h2, C);
+                    local_rho[pi - p] += rho_ij;
+                    local_rho[pj - p] += rho_ij;
+                }
             }
         }
-    }
 
-#pragma omp parallel for
-    for (int i = 0; i < n; i++)
-    {
-        particle_t *pi = p + i;
-        pi->rho += (315.0 / 64.0 / M_PI) * s->mass / h3;
-
-        // Interact with particles in the same bucket
-        // To prevent repeated calculations, only interact with particles after current
-        // Particles connected by next pointers are all in the same hash bucket after hashing
-        // particle_t* pj = pi->next;
-        // while (pj != NULL) {
-        //     update_density(pi, pj, h2, C);
-        //     pj = pj->next;
-        // }
-
-        // Interact with particles in the neighboring buckets
-        // To prevent repeated calculations, only interact with particles in buckets of greater hash
-        unsigned curr_bucket = particle_bucket(pi, h);
-        unsigned buckets[MAX_NBR_BINS]; // stores zm index of all neighboring bins
-        unsigned num_bins = particle_neighborhood(buckets, pi, h);
-        for (unsigned bin = 0; bin < num_bins; bin++)
-        { // for each bin
-            unsigned hash_bucket = buckets[bin];
-            if (hash_bucket <= curr_bucket)
-                continue;
-            for (particle_t *pj = hash[hash_bucket]; pj; pj = pj->next)
-            {
-                update_density(pi, pj, h2, C);
+#pragma omp for
+        for (int i = 0; i < n; i++)
+        {
+            particle_t *pi = p + i;
+            pi->rho += (315.0 / 64.0 / M_PI) * s->mass / h3;
+            unsigned curr_bucket = particle_bucket(pi, h);
+            unsigned buckets[MAX_NBR_BINS]; // stores the index of all neighboring bins
+            unsigned num_bins = particle_neighborhood(buckets, pi, h);
+            for (unsigned bin = 0; bin < num_bins; bin++)
+            { // for each bin
+                unsigned hash_bucket = buckets[bin];
+                if (hash_bucket <= curr_bucket)
+                    continue;
+                for (particle_t *pj = hash[hash_bucket]; pj; pj = pj->next)
+                {
+                    float rho_ij = local_update_density(pi, pj, h2, C);
+                    local_rho[pi - p] += rho_ij;
+                    local_rho[pj - p] += rho_ij;
+                }
             }
         }
+
+#pragma omp critical
+        {
+            for (int i = 0; i < n; i++)
+            {
+                p[i].rho += local_rho[i];
+            }
+        }
+        free(local_rho);
     }
     /* END TASK */
 #else
@@ -186,6 +246,40 @@ inline void update_forces(particle_t *pi, particle_t *pj, float h2,
     }
 }
 
+inline void local_update_forces(particle_t *pi, particle_t *pj, float h2,
+                                float rho0, float C0, float Cp, float Cv, float force_pi[3], float force_pj[3])
+{
+    float dx[3];
+    vec3_diff(dx, pi->x, pj->x);
+    float r2 = vec3_len2(dx);
+    if (r2 < h2)
+    {
+        const float rhoi = pi->rho;
+        const float rhoj = pj->rho;
+        float q = sqrt(r2 / h2);
+        float u = 1 - q;
+        float w0 = C0 * u / rhoi / rhoj;
+        float wp = w0 * Cp * (rhoi + rhoj - 2 * rho0) * u / q;
+        float wv = w0 * Cv;
+        float dv[3];
+
+        vec3_diff(dv, pi->v, pj->v);
+
+        force_pi[0] = wp * dx[0] + wv * dv[0];
+        force_pi[1] = wp * dx[1] + wv * dv[1];
+        force_pi[2] = wp * dx[2] + wv * dv[2];
+
+        force_pj[0] = -force_pi[0]; // Newton's third law
+        force_pj[1] = -force_pi[1];
+        force_pj[2] = -force_pi[2];
+    }
+    else
+    {
+        vec3_set(force_pi, 0, 0, 0);
+        vec3_set(force_pj, 0, 0, 0);
+    }
+}
+
 void compute_accel(sim_state_t *state, sim_param_t *params)
 {
     // Unpack basic parameters
@@ -223,39 +317,109 @@ void compute_accel(sim_state_t *state, sim_param_t *params)
 /* BEGIN TASK */
 
 // Interact with particles in the same bucket
-// #pragma omp parallel for schedule(static, 1)
-#pragma omp parallel for
-    for (int i = 0; i < HASH_SIZE; i++)
+// #pragma omp parallel for
+//     for (int i = 0; i < HASH_SIZE; i++)
+//     {
+//         for (particle_t *pi = state->hash[i]; pi; pi = pi->next)
+//         {
+//             for (particle_t *pj = pi->next; pj; pj = pj->next)
+//             {
+//                 update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
+//             }
+//         }
+//     }
+
+// // Interact with particles in the neighboring buckets
+// #pragma omp parallel for
+//     for (int i = 0; i < n; i++)
+//     {
+//         particle_t *pi = p + i;
+//         unsigned curr_bucket = particle_bucket(pi, h);
+//         unsigned buckets[MAX_NBR_BINS]; // stores zm index of all neighboring bins
+//         unsigned num_bins = particle_neighborhood(buckets, pi, h);
+//         for (unsigned bin = 0; bin < num_bins; bin++)
+//         { // for each bin
+//             unsigned hash_bucket = buckets[bin];
+//             if (hash_bucket <= curr_bucket)
+//                 continue;
+//             for (particle_t *pj = hash[hash_bucket]; pj; pj = pj->next)
+//             {
+//                 update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
+//             }
+//         }
+//     }
+#pragma omp parallel
     {
-        for (particle_t *pi = state->hash[i]; pi; pi = pi->next)
+        // Each thread has its own local force buffers
+        float(*local_forces)[3] = (float(*)[3])calloc(n, sizeof(float[3]));
+
+        // Interact with particles in the same bucket
+#pragma omp for
+        for (int i = 0; i < HASH_SIZE; i++)
         {
-            for (particle_t *pj = pi->next; pj; pj = pj->next)
+            for (particle_t *pi = state->hash[i]; pi; pi = pi->next)
             {
-                update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
+                for (particle_t *pj = pi->next; pj; pj = pj->next)
+                {
+                    float force_pi[3], force_pj[3];
+                    local_update_forces(pi, pj, h2, rho0, C0, Cp, Cv, force_pi, force_pj);
+
+                    // Accumulate forces locally for pi and pj
+                    local_forces[pi - p][0] += force_pi[0];
+                    local_forces[pi - p][1] += force_pi[1];
+                    local_forces[pi - p][2] += force_pi[2];
+
+                    local_forces[pj - p][0] += force_pj[0];
+                    local_forces[pj - p][1] += force_pj[1];
+                    local_forces[pj - p][2] += force_pj[2];
+                }
             }
         }
-    }
 
-// Interact with particles in the neighboring buckets
-#pragma omp parallel for
-    for (int i = 0; i < n; i++)
-    {
-        particle_t *pi = p + i;
-        unsigned curr_bucket = particle_bucket(pi, h);
-        unsigned buckets[MAX_NBR_BINS]; // stores zm index of all neighboring bins
-        unsigned num_bins = particle_neighborhood(buckets, pi, h);
-        for (unsigned bin = 0; bin < num_bins; bin++)
-        { // for each bin
-            unsigned hash_bucket = buckets[bin];
-            if (hash_bucket <= curr_bucket)
-                continue;
-            for (particle_t *pj = hash[hash_bucket]; pj; pj = pj->next)
-            {
-                update_forces(pi, pj, h2, rho0, C0, Cp, Cv);
+        // Interact with particles in neighboring buckets
+#pragma omp for
+        for (int i = 0; i < n; i++)
+        {
+            particle_t *pi = p + i;
+            unsigned curr_bucket = particle_bucket(pi, h);
+            unsigned buckets[MAX_NBR_BINS]; // stores the index of all neighboring bins
+            unsigned num_bins = particle_neighborhood(buckets, pi, h);
+            for (unsigned bin = 0; bin < num_bins; bin++)
+            { // for each bin
+                unsigned hash_bucket = buckets[bin];
+                if (hash_bucket <= curr_bucket)
+                    continue;
+                for (particle_t *pj = hash[hash_bucket]; pj; pj = pj->next)
+                {
+                    float force_pi[3], force_pj[3];
+                    local_update_forces(pi, pj, h2, rho0, C0, Cp, Cv, force_pi, force_pj);
+
+                    // Accumulate forces locally for pi and pj
+                    local_forces[pi - p][0] += force_pi[0];
+                    local_forces[pi - p][1] += force_pi[1];
+                    local_forces[pi - p][2] += force_pi[2];
+
+                    local_forces[pj - p][0] += force_pj[0];
+                    local_forces[pj - p][1] += force_pj[1];
+                    local_forces[pj - p][2] += force_pj[2];
+                }
             }
         }
-    }
 
+        // Update the global forces using the local accumulations
+#pragma omp critical
+        {
+            for (int i = 0; i < n; i++)
+            {
+                p[i].a[0] += local_forces[i][0];
+                p[i].a[1] += local_forces[i][1];
+                p[i].a[2] += local_forces[i][2];
+            }
+        }
+
+        // Free the local force buffer
+        free(local_forces);
+    }
     /* END TASK */
 #else
     for (int i = 0; i < n; ++i)
