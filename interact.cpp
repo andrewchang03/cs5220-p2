@@ -63,8 +63,9 @@ void compute_density(sim_state_t *s, sim_param_t *params)
         // Accumulate density info
 #ifdef USE_BUCKETING
 /* BEGIN TASK */
-// #pragma omp parallel for schedule(static, 1)
-#pragma omp parallel for
+
+// Interact with particles in the same bucket
+#pragma omp parallel for schedule(static, 1)
     for (int i = 0; i < HASH_SIZE; i++)
     {
         for (particle_t *pi = hash[i]; pi; pi = pi->next)
@@ -76,20 +77,11 @@ void compute_density(sim_state_t *s, sim_param_t *params)
         }
     }
 
-#pragma omp parallel for
+#pragma omp parallel for schedule(static, 1)
     for (int i = 0; i < n; i++)
     {
         particle_t *pi = p + i;
         pi->rho += (315.0 / 64.0 / M_PI) * s->mass / h3;
-
-        // Interact with particles in the same bucket
-        // To prevent repeated calculations, only interact with particles after current
-        // Particles connected by next pointers are all in the same hash bucket after hashing
-        // particle_t* pj = pi->next;
-        // while (pj != NULL) {
-        //     update_density(pi, pj, h2, C);
-        //     pj = pj->next;
-        // }
 
         // Interact with particles in the neighboring buckets
         // To prevent repeated calculations, only interact with particles in buckets of greater hash
@@ -97,7 +89,7 @@ void compute_density(sim_state_t *s, sim_param_t *params)
         unsigned buckets[MAX_NBR_BINS]; // stores zm index of all neighboring bins
         unsigned num_bins = particle_neighborhood(buckets, pi, h);
         for (unsigned bin = 0; bin < num_bins; bin++)
-        { // for each bin
+        {
             unsigned hash_bucket = buckets[bin];
             if (hash_bucket <= curr_bucket)
                 continue;
@@ -169,6 +161,7 @@ inline void update_forces(particle_t *pi, particle_t *pj, float h2,
         pj->a[1] -= wp * dx[1] + wv * dv[1];
 #pragma omp atomic
         pj->a[2] -= wp * dx[2] + wv * dv[2];
+
         // // #pragma omp critical
         // vec3_diff(dv, pi->v, pj->v);
 
@@ -223,8 +216,7 @@ void compute_accel(sim_state_t *state, sim_param_t *params)
 /* BEGIN TASK */
 
 // Interact with particles in the same bucket
-// #pragma omp parallel for schedule(static, 1)
-#pragma omp parallel for
+#pragma omp parallel for schedule(static, 1) collapse(1)
     for (int i = 0; i < HASH_SIZE; i++)
     {
         for (particle_t *pi = state->hash[i]; pi; pi = pi->next)
@@ -237,7 +229,7 @@ void compute_accel(sim_state_t *state, sim_param_t *params)
     }
 
 // Interact with particles in the neighboring buckets
-#pragma omp parallel for
+#pragma omp parallel for schedule(static, 1)
     for (int i = 0; i < n; i++)
     {
         particle_t *pi = p + i;
@@ -245,7 +237,7 @@ void compute_accel(sim_state_t *state, sim_param_t *params)
         unsigned buckets[MAX_NBR_BINS]; // stores zm index of all neighboring bins
         unsigned num_bins = particle_neighborhood(buckets, pi, h);
         for (unsigned bin = 0; bin < num_bins; bin++)
-        { // for each bin
+        {
             unsigned hash_bucket = buckets[bin];
             if (hash_bucket <= curr_bucket)
                 continue;
