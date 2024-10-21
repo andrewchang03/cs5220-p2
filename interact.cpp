@@ -36,7 +36,9 @@ inline void update_density(particle_t *pi, particle_t *pj, float h2, float C)
     if (z > 0)
     {
         float rho_ij = C * z * z * z;
+#pragma omp atomic
         pi->rho += rho_ij;
+#pragma omp atomic
         pj->rho += rho_ij;
     }
 }
@@ -54,13 +56,15 @@ void compute_density(sim_state_t *s, sim_param_t *params)
     float C = (315.0 / 64.0 / M_PI) * s->mass / h9;
 
     // Clear densities
+#pragma omp parallel for
     for (int i = 0; i < n; ++i)
         p[i].rho = 0;
 
         // Accumulate density info
 #ifdef USE_BUCKETING
-    /* BEGIN TASK */
-    // #pragma omp parallel for schedule(static, 1)
+/* BEGIN TASK */
+// #pragma omp parallel for schedule(static, 1)
+#pragma omp parallel for
     for (int i = 0; i < HASH_SIZE; i++)
     {
         for (particle_t *pi = hash[i]; pi; pi = pi->next)
@@ -72,6 +76,7 @@ void compute_density(sim_state_t *s, sim_param_t *params)
         }
     }
 
+#pragma omp parallel for
     for (int i = 0; i < n; i++)
     {
         particle_t *pi = p + i;
@@ -148,15 +153,36 @@ inline void update_forces(particle_t *pi, particle_t *pj, float h2,
         float wp = w0 * Cp * (rhoi + rhoj - 2 * rho0) * u / q;
         float wv = w0 * Cv;
         float dv[3];
+
         vec3_diff(dv, pi->v, pj->v);
 
-        // Equal and opposite pressure forces
-        vec3_saxpy(pi->a, wp, dx);
-        vec3_saxpy(pj->a, -wp, dx);
+#pragma omp atomic
+        pi->a[0] += wp * dx[0] + wv * dv[0];
+#pragma omp atomic
+        pi->a[1] += wp * dx[1] + wv * dv[1];
+#pragma omp atomic
+        pi->a[2] += wp * dx[2] + wv * dv[2];
 
-        // Equal and opposite viscosity forces
-        vec3_saxpy(pi->a, wv, dv);
-        vec3_saxpy(pj->a, -wv, dv);
+#pragma omp atomic
+        pj->a[0] -= wp * dx[0] + wv * dv[0];
+#pragma omp atomic
+        pj->a[1] -= wp * dx[1] + wv * dv[1];
+#pragma omp atomic
+        pj->a[2] -= wp * dx[2] + wv * dv[2];
+        // // #pragma omp critical
+        // vec3_diff(dv, pi->v, pj->v);
+
+        // // Equal and opposite pressure forces
+        // // #pragma omp critical
+        // vec3_saxpy(pi->a, wp, dx);
+        // // #pragma omp critical
+        // vec3_saxpy(pj->a, -wp, dx);
+
+        // // Equal and opposite viscosity forces
+        // // #pragma omp critical
+        // vec3_saxpy(pi->a, wv, dv);
+        // // #pragma omp critical
+        // vec3_saxpy(pj->a, -wv, dv);
     }
 }
 
@@ -182,7 +208,8 @@ void compute_accel(sim_state_t *state, sim_param_t *params)
     // Compute density and color
     compute_density(state, params);
 
-    // Start with gravity and surface forces
+// Start with gravity and surface forces
+#pragma omp parallel for
     for (int i = 0; i < n; ++i)
         vec3_set(p[i].a, 0, -g, 0);
 
@@ -193,10 +220,11 @@ void compute_accel(sim_state_t *state, sim_param_t *params)
 
     // Accumulate forces
 #ifdef USE_BUCKETING
-    /* BEGIN TASK */
+/* BEGIN TASK */
 
-    // Interact with particles in the same bucket
-    // #pragma omp parallel for schedule(static, 1)
+// Interact with particles in the same bucket
+// #pragma omp parallel for schedule(static, 1)
+#pragma omp parallel for
     for (int i = 0; i < HASH_SIZE; i++)
     {
         for (particle_t *pi = state->hash[i]; pi; pi = pi->next)
@@ -208,8 +236,8 @@ void compute_accel(sim_state_t *state, sim_param_t *params)
         }
     }
 
-    // Interact with particles in the neighboring buckets
-    // #pragma omp parallel for
+// Interact with particles in the neighboring buckets
+#pragma omp parallel for
     for (int i = 0; i < n; i++)
     {
         particle_t *pi = p + i;
