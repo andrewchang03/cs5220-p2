@@ -82,7 +82,7 @@ void hash_particles(sim_state_t *s, float h)
 {
     /* BEGIN TASK */
     memset(s->hash, 0, HASH_SIZE * sizeof(particle_t *));
-#pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < s->n; i++)
     { // iterate through each particle
         particle_t *pi = &s->part[i];
