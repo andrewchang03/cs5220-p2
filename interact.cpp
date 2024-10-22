@@ -91,7 +91,6 @@ void compute_density(sim_state_t *s, sim_param_t *params)
                 }
             }
         }
-
 #pragma omp for
         for (int i = 0; i < n; i++)
         {
@@ -113,7 +112,6 @@ void compute_density(sim_state_t *s, sim_param_t *params)
                 }
             }
         }
-
 #pragma omp critical
         {
             for (int i = 0; i < n; i++)
@@ -225,7 +223,7 @@ inline void local_update_forces(particle_t *pi, particle_t *pj, float h2,
         force_pi[1] = wp * dx[1] + wv * dv[1];
         force_pi[2] = wp * dx[2] + wv * dv[2];
 
-        force_pj[0] = -force_pi[0]; // Newton's third law
+        force_pj[0] = -force_pi[0];
         force_pj[1] = -force_pi[1];
         force_pj[2] = -force_pi[2];
     }
@@ -326,7 +324,6 @@ void compute_accel(sim_state_t *state, sim_param_t *params)
             }
         }
 
-        // Update the global forces using the local accumulations
 #pragma omp critical
         {
             for (int i = 0; i < n; i++)
