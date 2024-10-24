@@ -22,21 +22,6 @@
 
 #define HASH_MASK (HASH_DIM - 1)
 
-// std::vector<omp_lock_t> locks;
-
-// int init()
-// {
-//     locks = std::vector<omp_lock_t>(HASH_SIZE);
-// #pragma omp parallel for
-//     for (int i = 0; i < HASH_SIZE; i++)
-//     {
-//         omp_init_lock(&locks[i]);
-//     }
-//     return 0;
-// }
-
-// int d = init();
-
 unsigned particle_bucket(particle_t *p, float h)
 {
     unsigned ix = p->x[0] / h;
@@ -82,15 +67,12 @@ void hash_particles(sim_state_t *s, float h)
 {
     /* BEGIN TASK */
     memset(s->hash, 0, HASH_SIZE * sizeof(particle_t *));
-    // #pragma omp parallel for
     for (int i = 0; i < s->n; i++)
     { // iterate through each particle
         particle_t *pi = &s->part[i];
         unsigned zm_index = particle_bucket(pi, h); // calculate zm index (the hash)
-        // omp_set_lock(&locks[zm_index]);
-        pi->next = s->hash[zm_index]; // prepend current particle to hash bucket
-        s->hash[zm_index] = pi;       // update head
-        // omp_unset_lock(&locks[zm_index]);
+        pi->next = s->hash[zm_index];               // prepend current particle to hash bucket
+        s->hash[zm_index] = pi;                     // update head
     }
     /* END TASK */
 }
